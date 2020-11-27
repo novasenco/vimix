@@ -2,46 +2,13 @@
 let s:save_cpo = &cpo
 set cpo&vim
 
-let s:default_palette = [
- \ '#000000', '#800000', '#008000', '#808000', '#000080', '#800080', '#008080', '#c0c0c0',
- \ '#808080', '#ff0000', '#00ff00', '#ffff00', '#0000ff', '#ff00ff', '#00ffff', '#ffffff' ]
-
 let s:hiFmt = 'highlight %s cterm=%s ctermfg=%s ctermbg=%s gui=%s guifg=%s guibg=%s'
 let s:atMap = {'B':'bold', 'U':'underline', 'R':'reverse', 'I':'italic', 'N':'NONE'}
-
-function! vimix#hexToApproxAnsi(hex)
-  let i = index(s:default_alette, a:hex)
-  if i isnot -1
-    return i
-  endif
-  for i in range(16, 256)
-    if a:hex is vimix#ansiToHex(i)
-      return i
-    endif
-  endfor
-  return 0
-endfunction
-
-function! vimix#ansiToHex(ansi)
-  if a:ansi < 16
-    return s:default_palette[a:ansi]
-  elseif a:ansi > 231
-    let gray = 8 + 10 * (a:ansi - 232)
-    return printf('#%02x%02x%02x', gray, gray, gray)
-  endif
-  let ri = (a:ansi - 16) / 36
-  let r = ri > 0 ? 55 + ri * 40 : ri > 0
-  let gi = ((a:ansi - 16) % 36) / 6
-  let g = gi > 0 ? 55 + gi * 40 : gi > 0
-  let bi = (a:ansi - 16) % 6
-  let b = bi > 0 ? 55 + bi * 40 : bi > 0
-  return printf('#%02x%02x%02x', r, g, b)
-endfunction
 
 function! s:preamble(meta, defs, lines16, links)
   let palette = map(range(16), 'get(a:defs, v:val).gui')
   if index(palette, '0') >= 0
-    call s:W(3, 1, 'Unfinished Palette (changing all 0''s to #000000', string(palette))
+    call vimix#utils#warn(3, 1, 'Unfinished Palette (changing all 0''s to #000000', string(palette))
   endif
   let palette = map(palette, 'v:val is 0 ? "#000000" : v:val')
   let fg = get(a:defs, 'fg', 'NONE')
@@ -56,7 +23,7 @@ function! s:preamble(meta, defs, lines16, links)
    \ "if exists('syntax_on')",
    \ 'syntax reset',
    \ 'endif',
-   \ "let colors_name = 'vulpo'",
+   \ "let colors_name = '".(a:meta.name)."'",
    \]
   let bgtype = a:meta.type is '' ? get(g:, 'vimix_assume_bg', 'dark') : a:meta.type
   if bgtype =~? '^\%(dark\|light\)$'
@@ -82,21 +49,7 @@ function! s:preamble(meta, defs, lines16, links)
   return pre
 endfunction
 
-function! s:E(erno, lnr, msg, token) abort
-  echohl ErrorMsg
-  unsilent echom 'VimixE'.a:erno '[line' a:lnr.']:' a:msg.':' string(a:token)
-  echohl NONE
-  return a:erno
-endfunction
-
-function! s:W(erno, lnr, msg, token) abort
-  echohl WarningMsg
-  unsilent echom 'VimixW'.a:erno '[line' a:lnr.']:' a:msg.':' string(a:token)
-  echohl NONE
-  return a:erno
-endfunction
-
-function! vimix#export(...) abort
+function! vimix#parse() abort
   let meta = {'name':'vimix', 'description':'', 'author':''}
   let defs = {'none':{'cterm':'NONE', 'gui':'NONE'}}
   let defs['~'] = defs['none']
@@ -107,7 +60,6 @@ function! vimix#export(...) abort
   let base16map['~'] = base16map['none']
   let links = []
   let linenr = 0
-  " loop over lines and extract into data
   for line in getline(1, '$')
     let linenr += 1
 
@@ -149,34 +101,34 @@ function! vimix#export(...) abort
       let gui = ''
       let alias = ''
       if lenrhs < 2 
-        return s:E(2, linenr, 'Definition Needs Cterm and Gui Colors', line)
+        return vimix#utils#error(2, linenr, 'Definition Needs Cterm and Gui Colors', line)
       elseif lenrhs is 2
         let [cterm, gui] = rhs
       elseif lenrhs is 3
         let [cterm, gui, alias] = rhs
       else
-        return s:E(5, linenr, 'Definition Has Too Many Values', line)
+        return vimix#utils#error(5, linenr, 'Definition Has Too Many Values', line)
       endif
       if cterm is '~' && gui is '~'
-        return s:E(6, linenr, 'Definition Cannot Have Two Auto Values', line)
+        return vimix#utils#error(6, linenr, 'Definition Cannot Have Two Auto Values', line)
       endif
       if gui is '~'
-        let gui = vimix#ansiToHex(cterm)
+        let gui = vimix#convert#ansiToHex(cterm)
       elseif cterm is '~'
-        let cterm = vimix#hexToApproxAnsi(gui)
+        let cterm = vimix#convert#hexToApproxAnsi(gui)
       endif
       let defs[name] = {'cterm':cterm, 'gui':gui}
       if alias isnot ''
         if name =~ '^\d\+$'
           if alias !~ '^\[\l\w\+\]$'
-            return s:E(4, linenr, 'Definition Has Invalid Alias ('.string(alias).')', line)
+            return vimix#utils#error(4, linenr, 'Definition Has Invalid Alias ('.string(alias).')', line)
           endif
           let alias = strpart(alias, 1, strlen(alias) - 2)
           let defs[alias] = defs[name]
           let base16map[alias] = [str2nr(name), str2nr(name)]
         else
           if alias !~ '^\[\s*\%(\d\+\|none\|\~\)\s*,\s*\%(\d\+\|none\|\~\)\s*\]$'
-            return s:E(3, linenr, 'Definition Has Invalid Base16 Map ('.string(alias).')', line)
+            return vimix#utils#error(3, linenr, 'Definition Has Invalid Base16 Map ('.string(alias).')', line)
           endif
           let base16map[name] = split(substitute(alias, '^\[\s*\|\s*\]$', '', 'g'), '\s*,\s*')
         endif
@@ -197,7 +149,7 @@ function! vimix#export(...) abort
       let rhs = split(line)
       let group = remove(rhs, 0)
       if rhs is ''
-        call s:W(1, linenr, 'Empty Highlight Group', line)
+        call vimix#utils#warn(1, linenr, 'Empty Highlight Group', line)
       endif
       let at = 'N'
       let fg = 'none'
@@ -214,10 +166,10 @@ function! vimix#export(...) abort
             let bg = attr
             let ind += 1
           else
-            return s:E(7, linenr, 'Too Many Defs (1/2 only) for Hl Group', line)
+            return vimix#utils#error(7, linenr, 'Too Many Defs (1/2 only) for Hl Group', line)
           endif
         elseif attr isnot '~'
-          return s:E(8, linenr, 'Unkown Def ('.string(attr).') for Hl Group', line)
+          return vimix#utils#error(8, linenr, 'Unkown Def ('.string(attr).') for Hl Group', line)
         endif
       endfor
       let at = join(map(split(at, '\zs'), 'get(s:atMap, v:val, "NONE")'), ',')
@@ -228,10 +180,15 @@ function! vimix#export(...) abort
 
     elseif line !~ '^\s*!'
       " Invalid Line:
-      return s:E(1, linenr, 'Invalid Line', line)
+      return vimix#utils#error(1, linenr, 'Invalid Line', line)
 
     endif
   endfor
+  return [ meta, defs, groups, lines, lines16, base16map, links ]
+endfunction
+
+function! vimix#export(...) abort
+  let [ meta, defs, groups, lines, lines16, base16map, links ] = vimix#parse()
   let ind = 0
   while lines[ind] =~ '^\s*"'
     let ind += 1
@@ -250,11 +207,12 @@ function! vimix#export(...) abort
   endif
   let out = outdir.(meta.name).'.vim'
   if filereadable(out) && (a:0 > 2 && !a:3 && confirm('File Exists: '.fnameescape(out).' Overwrite?', "&Yes\n&No") isnot 1)
-    execute (a:0 > 1 ? a:2 : '') 'new'
+    execute 'noautocmd' (a:0 > 1 ? a:2 : '') 'new'
   else
     let wid = bufwinid(bufnr(fnamemodify(out, ':p')))
     if wid is -1
-      execute (a:0 > 1 ? a:2 : '') 'split' fnameescape(out)
+      let v:swapchoice = 'e'
+      execute 'noautocmd noswapfile' (a:0 > 1 ? a:2 : '') 'split' fnameescape(out)
     else
       call win_gotoid(wid)
     endif

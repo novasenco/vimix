@@ -5,7 +5,7 @@ endif
 
 let b:did_ftplugin = 1
 
-let b:undo_ftplugin = "setl cms< kp< | if has('vms') | setl isk< | endif | delc Vimix TestVimix"
+let b:undo_ftplugin = "setl cms< kp< | if has('vms') | setl isk< | endif | delc Vimix | delc TestVimix"
 
 setlocal commentstring=!\ %s
 setlocal keywordprg=:help
