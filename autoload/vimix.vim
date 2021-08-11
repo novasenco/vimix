@@ -5,6 +5,65 @@ set cpo&vim
 let s:hiFmt = 'highlight %s cterm=%s ctermfg=%s ctermbg=%s gui=%s guifg=%s guibg=%s'
 let s:atMap = {'B':'bold', 'U':'underline', 'R':'reverse', 'I':'italic', 'N':'NONE'}
 
+function! vimix#hi()
+  let lnr = 0
+  for line in getline(1, '$')
+    let lnr += 1
+    if line =~ '^\%(\s*\w\+\%(\s*->\s*\w\+\)*\s*->\s*\w\+\s*\%(;\|$\)\)\+$'
+      " Links: <from> [ -> <from> ... ] -> <to> [ ; <from> [ -> <from> ... ] -> <to> ... ]
+      " let defs = map(split(line, '\s*;\s*'), { _,c -> split(c, '\s*->\s*') })
+    elseif line =~ '^\s*\w\+\s\+[[:alnum:]_~].*'
+      " Highlight Group: <group> [atts] [foreground] [background]
+      let [name, rhs] = split(substitute(line, '["!].*', '', ''), ':')
+      let name = substitute(name, '^\s\+\|\s\+$', '', 'g')
+      let rhs = split(rhs)
+      let lenrhs = len(rhs)
+      let cterm = ''
+      let gui = ''
+      let alias = ''
+      if lenrhs < 2
+        " return vimix#utils#error(2, linenr, 'Definition Needs Cterm and Gui Colors', line)
+        continue
+      elseif lenrhs is 2
+        let [cterm, gui] = rhs
+      elseif lenrhs is 3
+        let [cterm, gui, alias] = rhs
+      else
+        " return vimix#utils#error(5, linenr, 'Definition Has Too Many Values', line)
+        continue
+      endif
+      if cterm is '~' && gui is '~'
+        " return vimix#utils#error(6, linenr, 'Definition Cannot Have Two Auto Values', line)
+        continue
+      endif
+      if gui is '~'
+        let gui = vimix#convert#ansiToHex(cterm)
+      elseif cterm is '~'
+        let cterm = vimix#convert#hexToApproxAnsi(gui)
+      endif
+      let defs[name] = {'cterm':cterm, 'gui':gui}
+      if alias isnot ''
+        if name =~ '^\d\+$'
+          if alias !~ '^\[\l\w\+\]$'
+            return vimix#utils#error(4, linenr, 'Definition Has Invalid Alias ('.string(alias).')', line)
+          endif
+          let alias = strpart(alias, 1, strlen(alias) - 2)
+          let defs[alias] = defs[name]
+          let base16map[alias] = [str2nr(name), str2nr(name)]
+        else
+          if alias !~ '^\[\s*\%(\d\+\|none\|\~\)\s*,\s*\%(\d\+\|none\|\~\)\s*\]$'
+            return vimix#utils#error(3, linenr, 'Definition Has Invalid Base16 Map ('.string(alias).')', line)
+          endif
+          let base16map[name] = split(substitute(alias, '^\[\s*\|\s*\]$', '', 'g'), '\s*,\s*')
+        endif
+      endif
+
+    elseif line =~ '^\s*\%(\l\w*\|\d\+\)\s*:'
+      " Definition: <name> : <cterm> <gui> [<alias>] <<base16>>
+    endif
+  endfor
+endfunction
+
 function! s:preamble(meta, defs, lines16, links)
   let palette = map(range(16), 'get(a:defs, v:val).gui')
   if index(palette, '0') >= 0
